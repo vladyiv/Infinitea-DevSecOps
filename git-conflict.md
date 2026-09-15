@@ -35,4 +35,9 @@
 
 **4.	Создала и заполнила git-conflict.**
 
+## Графы
+<img width="1146" height="465" alt="Снимок экрана 2026-09-15 в 10 56 34" src="https://github.com/user-attachments/assets/4f461399-b09f-42e1-8e86-6bdf3831c6b5" />
+<img width="1297" height="532" alt="Снимок экрана 2026-09-14 в 13 05 35" src="https://github.com/user-attachments/assets/40e40b31-46af-4668-a4c4-62e619b2a02d" />
+
+
 
