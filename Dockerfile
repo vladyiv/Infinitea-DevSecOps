@@ -32,5 +32,5 @@ COPY --from=build /app/publish .
 EXPOSE 8080
 # указываю, на каком порту нужно принимать запросы
 ENV ASPNETCORE_URLS=http://+:8080
-# пишу, что именно нужно запустить
+# пишу, что именно нужно выполнить при запуске образа
 ENTRYPOINT ["dotnet", "Infinitea.Api.dll"]
