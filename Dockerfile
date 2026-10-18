@@ -15,10 +15,10 @@ RUN dotnet restore Infinitea.Api/Infinitea.Api.csproj
 COPY Infinitea.Api/ Infinitea.Api/
 
 # собираю приложение
-RUN dotnet publish Infinitea.Api/Infinitea.Api.csproj \ 
+# ставлю --no-restore, потому что restore уже был выполнен выше
+RUN dotnet publish Infinitea.Api/Infinitea.Api.csproj \
     -c Release \
     -o /app/publish \
-    # ставлю --no-restore, потому что restore уже был выполнен выше
     --no-restore
 
 # запуск
