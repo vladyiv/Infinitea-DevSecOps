@@ -79,7 +79,7 @@ API-приложение "Мини-магазин чая Infnintea" с базо�
 
 2. Собрать образ:
 
-`docker compose build .`
+`docker compose build`
 
 3. Запустить образ:
 
