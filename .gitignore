@@ -1,0 +1,19 @@
+# Секреты и настройки окружения
+.env
+.env.local
+
+# Папки сборки .NET
+[Dd]ebug/
+[Rr]elease/
+**/bin/
+**/obj/
+
+# Настройки сред разработки (IDE)
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+
+# Логи Docker
+.dockerignore
