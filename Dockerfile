@@ -9,14 +9,14 @@ WORKDIR /src
 COPY Infinitea.Api/Infinitea.Api.csproj Infinitea.Api/
 
 # восстанавливаю/скачиваю зависимости проекта
-RUN dotnet restore Infinitea.Api/Infinitea.Api.csproj
+RUN dotnet restore ProductsService/Infinitea.Api.csproj
 
 # теперь копирую весь проект
-COPY Infinitea.Api/ Infinitea.Api/
+COPY ProductsService/ ProductsService/
 
 # собираю приложение
 # ставлю --no-restore, потому что restore уже был выполнен выше
-RUN dotnet publish Infinitea.Api/Infinitea.Api.csproj \
+RUN dotnet publish ProductsService/Infinitea.Api.csproj \s
     -c Release \
     -o /app/publish \
     --no-restore
