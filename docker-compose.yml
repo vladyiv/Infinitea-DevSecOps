@@ -1,16 +1,26 @@
 services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: infinitea-redis
+    restart: unless-stopped
+
   api:
-    image: infinitea-api
+    image: infinitea-products
     build:
       context: .
+      dockerfile: ProductsService/Dockerfile
     ports:
       - "${API_PORT}:8080"
     environment:
       - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:8080
+      - Redis__ConnectionString=redis:6379
     depends_on:
       - db
+      - redis
+
   db:
     image: postgres:16
     environment:
@@ -19,5 +29,57 @@ services:
       POSTGRES_DB: ${DB_NAME}
     volumes:
       - db_data:/var/lib/postgresql/data
+
+  users:
+    image: infinitea-users
+    build:
+      context: .
+      dockerfile: UsersService/Dockerfile
+    ports:
+      - "${USERS_API_PORT}:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=users-db;Port=5432;Database=${USERS_DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+    depends_on:
+      - users-db
+
+  users-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${USERS_DB_NAME}
+    volumes:
+      - users_db_data:/var/lib/postgresql/data
+      
+  
+  
+  orders:
+    image: infinitea-orders
+    build:
+      context: .
+      dockerfile: OrdersService/Dockerfile
+    ports:
+      - "${ORDERS_API_PORT}:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=orders-db;Port=5432;Database=${ORDERS_DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+    depends_on:
+      - orders-db
+
+  orders-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${ORDERS_DB_NAME}
+    volumes:
+      - orders_db_data:/var/lib/postgresql/data
+
+
 volumes:
   db_data:
+  users_db_data:
+  orders_db_data:
