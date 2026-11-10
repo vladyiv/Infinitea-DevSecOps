@@ -5,7 +5,7 @@ services:
     container_name: infinitea-redis
     restart: unless-stopped
 
-  api:
+  products:
     image: infinitea-products
     build:
       context: .
@@ -41,6 +41,9 @@ services:
       - ConnectionStrings__DefaultConnection=Host=users-db;Port=5432;Database=${USERS_DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:8080
+      - Jwt__Key=${JWT_SECRET}
+      - Jwt__Issuer=Infinitea
+      - Jwt__Audience=InfiniteaClients
     depends_on:
       - users-db
 
