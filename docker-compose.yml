@@ -4,6 +4,43 @@ services:
     image: redis:7-alpine
     container_name: infinitea-redis
     restart: unless-stopped
+    
+  keycloak-db:
+    image: postgres:16
+    container_name: infinitea-keycloak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: ${KEYCLOAK_DB_USER}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_DB_USER} -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    container_name: infinitea-keycloak
+    restart: unless-stopped
+    command: start-dev
+    ports:
+      - "8083:8080"
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://localhost:8083
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
 
   products:
     image: infinitea-products
@@ -44,8 +81,10 @@ services:
       - Jwt__Key=${JWT_SECRET}
       - Jwt__Issuer=Infinitea
       - Jwt__Audience=InfiniteaClients
+      - Redis__ConnectionString=redis:6379
     depends_on:
       - users-db
+      - redis
 
   users-db:
     image: postgres:16
@@ -86,3 +125,4 @@ volumes:
   db_data:
   users_db_data:
   orders_db_data:
+  keycloak_db_data:

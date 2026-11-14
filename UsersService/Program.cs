@@ -5,11 +5,45 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using StackExchange.Redis;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.OAuth2,
+        Flows = new OpenApiOAuthFlows
+        {
+            AuthorizationCode = new OpenApiOAuthFlow
+            {
+                AuthorizationUrl = new Uri(
+                    "http://localhost:8083/realms/infinitea/protocol/openid-connect/auth"),
+
+                TokenUrl = new Uri(
+                    "http://localhost:8083/realms/infinitea/protocol/openid-connect/token"),
+
+                Scopes = new Dictionary<string, string>
+                {
+                    { "openid", "OpenID" },
+                    { "profile", "User profile" },
+                    { "email", "User email" }
+                }
+            }
+        }
+    });
+
+    options.AddSecurityRequirement(document =>
+    new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("oauth2", document)] =
+            new List<string> { "openid", "profile", "email" }
+    });
+});
 
 // Подключение к PostgreSQL
 var connectionString =
@@ -18,45 +52,53 @@ var connectionString =
 builder.Services.AddDbContext<UsersDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+var redisConnectionString =
+    builder.Configuration["Redis:ConnectionString"];
 
-var jwtKey = builder.Configuration["Jwt:Key"];
-
-if (string.IsNullOrWhiteSpace(jwtKey) ||
-    Encoding.UTF8.GetByteCount(jwtKey) < 32)
+if (string.IsNullOrWhiteSpace(redisConnectionString))
 {
     throw new InvalidOperationException(
-        "JWT Key должен содержать минимум 32 байта");
+        "Не задан Redis:ConnectionString");
 }
 
-var issuer = builder.Configuration["Jwt:Issuer"];
-var audience = builder.Configuration["Jwt:Audience"];
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    ConnectionMultiplexer.Connect(redisConnectionString));
+
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+
+var keycloakAuthority =
+    builder.Configuration["Keycloak:Authority"];
+
+var keycloakIssuer =
+    builder.Configuration["Keycloak:Issuer"];
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = issuer,
+        options.Authority = keycloakAuthority;
+        options.RequireHttpsMetadata = false;
 
-            ValidateAudience = true,
-            ValidAudience = audience,
+        options.TokenValidationParameters =
+            new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuer = keycloakIssuer,
 
-            ValidateLifetime = true,
+                // Аудиторию настроим отдельно
+                ValidateAudience = false,
 
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtKey)),
-
-            ClockSkew = TimeSpan.Zero
-        };
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            };
     });
 
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
+
+Console.WriteLine($"Redis подключён: {redis.IsConnected}");
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -65,7 +107,12 @@ app.UseAuthorization();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+
+    app.UseSwaggerUI(options =>
+    {
+        options.OAuthClientId("infinitea-swagger");
+        options.OAuthUsePkce();
+    });
 }
 
 // Создание базы данных и таблиц, если их ещё нет
@@ -83,7 +130,7 @@ app.MapGet("/api/users", async (UsersDbContext db) =>
         .ToListAsync();
 
     return Results.Ok(users);
-})
+});
 
 // Получить пользователя по ID
 app.MapGet("/api/users/{id}", async (int id, UsersDbContext db) =>
@@ -219,7 +266,8 @@ app.MapPost("/api/auth/login", async (
     var claims = new[]
     {
         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new Claim(ClaimTypes.Name, user.Username)
+        new Claim(ClaimTypes.Name, user.Username),
+        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
     };
 
     // Создаём JWT
@@ -296,7 +344,7 @@ app.MapPut("/api/users/{id}", async (
         user.Username,
         user.Email
     });
-});
+})
 .RequireAuthorization();
 
 // Удалить пользователя
@@ -319,7 +367,7 @@ app.MapDelete("/api/users/{id}", async (
 
     return Results.Ok(
         new { message = $"Пользователь {user.Username} удалён" });
-});
+})
 .RequireAuthorization();
 
 app.Run();
