@@ -41,6 +41,20 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
+        
+  gateway:
+    image: infinitea-gateway
+    build:
+      context: .
+      dockerfile: GatewayService/Dockerfile
+    ports:
+      - "8084:8080"
+    depends_on:
+      - products
+      - users
+      - orders
+    restart: unless-stopped
+
 
   products:
     image: infinitea-products
