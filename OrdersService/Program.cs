@@ -1,5 +1,5 @@
-
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +11,10 @@ var connectionString =
 
 builder.Services.AddDbContext<OrdersDbContext>(options =>
     options.UseNpgsql(connectionString));
+builder.Services.AddHttpClient("ProductsService", client =>
+{
+    client.BaseAddress = new Uri("http://products:8080/");
+});
 
 var app = builder.Build();
 
@@ -39,44 +43,84 @@ app.MapGet("/api/cart/{userId:int}", async (int userId, OrdersDbContext db) =>
     return Results.Ok(cart);
 });
 
-// 2. Добавить товар в корзину
-app.MapPost("/api/cart/{userId:int}/items",
-    async (int userId, AddCartItemRequest request, OrdersDbContext db) =>
+// 5. Оформить заказ из корзины
+app.MapPost("/api/orders/{userId:int}",
+    async (
+        int userId,
+        OrdersDbContext db,
+        IHttpClientFactory httpClientFactory) =>
 {
-    Console.WriteLine($"Получен запрос: POST /api/cart/{userId}/items");
+    Console.WriteLine($"Получен запрос: POST /api/orders/{userId}");
 
-    if (request.ProductId <= 0 || request.Quantity <= 0)
+    // Получаем товары пользователя из корзины
+    var cartItems = await db.CartItems
+        .Where(item => item.UserId == userId)
+        .ToListAsync();
+
+    if (cartItems.Count == 0)
     {
         return Results.BadRequest(new
         {
-            message = "ProductId и Quantity должны быть больше нуля"
+            message = "Нельзя оформить заказ: корзина пуста"
         });
     }
 
-    var item = await db.CartItems.FirstOrDefaultAsync(
-        item => item.UserId == userId &&
-                item.ProductId == request.ProductId);
+    // Создаём HTTP-клиент для ProductsService
+    var client = httpClientFactory.CreateClient("ProductsService");
 
-    if (item is not null)
+    var orderItems = new List<OrderItem>();
+
+    // Получаем информацию о каждом товаре
+    foreach (var cartItem in cartItems)
     {
-        // Если товар уже есть в корзине, увеличиваем количество
-        item.Quantity += request.Quantity;
-    }
-    else
-    {
-        item = new CartItem
+        var response = await client.GetAsync(
+            $"api/products/{cartItem.ProductId}");
+
+        if (!response.IsSuccessStatusCode)
         {
-            UserId = userId,
-            ProductId = request.ProductId,
-            Quantity = request.Quantity
-        };
+            return Results.BadRequest(new
+            {
+                message = $"Товар с ID {cartItem.ProductId} не найден"
+            });
+        }
 
-        db.CartItems.Add(item);
+        var product = await response.Content
+            .ReadFromJsonAsync<ProductResponse>();
+
+        if (product is null)
+        {
+            return Results.BadRequest(new
+            {
+                message = $"Не удалось получить товар с ID {cartItem.ProductId}"
+            });
+        }
+
+        orderItems.Add(new OrderItem
+        {
+            ProductId = product.Id,
+            Quantity = cartItem.Quantity,
+            UnitPrice = product.Price
+        });
     }
+
+    // Создаём заказ
+    var order = new Order
+    {
+        UserId = userId,
+        CreatedAt = DateTime.UtcNow,
+        Items = orderItems
+    };
+
+    db.Orders.Add(order);
+
+    // Очищаем корзину
+    db.CartItems.RemoveRange(cartItems);
 
     await db.SaveChangesAsync();
 
-    return Results.Ok(item);
+    return Results.Created(
+        $"/api/orders/{order.Id}",
+        order);
 });
 
 // 3. Изменить количество товара в корзине
@@ -86,6 +130,7 @@ app.MapPut("/api/cart/{userId:int}/items/{productId:int}",
 {
     Console.WriteLine(
         $"Получен запрос: PUT /api/cart/{userId}/items/{productId}");
+        
 
     if (request.Quantity <= 0)
     {
@@ -160,6 +205,63 @@ app.MapGet("/api/orders/{orderId:int}",
     return Results.Ok(order);
 });
 
+// Добавить товар в корзину
+app.MapPost("/api/cart/{userId:int}/items",
+    async (
+        int userId,
+        AddCartItemRequest request,
+        OrdersDbContext db,
+        IHttpClientFactory httpClientFactory) =>
+{
+    Console.WriteLine($"Получен запрос: POST /api/cart/{userId}/items");
+
+    if (request.Quantity <= 0)
+    {
+        return Results.BadRequest(new
+        {
+            message = "Количество товара должно быть больше нуля"
+        });
+    }
+
+    // Проверяем существование товара в ProductsService
+    var client = httpClientFactory.CreateClient("ProductsService");
+
+    var response = await client.GetAsync(
+        $"api/products/{request.ProductId}");
+
+    if (!response.IsSuccessStatusCode)
+    {
+        return Results.BadRequest(new
+        {
+            message = $"Товар с ID {request.ProductId} не найден"
+        });
+    }
+
+    // Ищем товар в корзине пользователя
+    var cartItem = await db.CartItems.FirstOrDefaultAsync(item =>
+        item.UserId == userId &&
+        item.ProductId == request.ProductId);
+
+    if (cartItem is null)
+    {
+        cartItem = new CartItem
+        {
+            UserId = userId,
+            ProductId = request.ProductId,
+            Quantity = request.Quantity
+        };
+
+        db.CartItems.Add(cartItem);
+    }
+    else
+    {
+        cartItem.Quantity += request.Quantity;
+    }
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(cartItem);
+});
 app.Run();
 
 
@@ -176,6 +278,12 @@ class UpdateCartItemRequest
     public int Quantity { get; set; }
 }
 
+class ProductResponse
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+}
 
 // Модели данных
 
@@ -193,6 +301,7 @@ class Order
     public int UserId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public List<OrderItem> Items { get; set; } = new();
+    public decimal TotalAmount => Items.Sum(item => item.TotalPrice);
 }
 
 class OrderItem
@@ -202,6 +311,7 @@ class OrderItem
     public int ProductId { get; set; }
     public int Quantity { get; set; }
     public decimal UnitPrice { get; set; }
+    public decimal TotalPrice => Quantity * UnitPrice;
 }
 
 

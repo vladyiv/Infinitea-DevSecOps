@@ -1,12 +1,11 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using StackExchange.Redis;
 using Microsoft.OpenApi;
+
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -63,8 +62,6 @@ if (string.IsNullOrWhiteSpace(redisConnectionString))
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(
     ConnectionMultiplexer.Connect(redisConnectionString));
-
-builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
 var keycloakAuthority =
     builder.Configuration["Keycloak:Authority"];
@@ -156,138 +153,6 @@ app.MapGet("/api/users/{id}", async (int id, UsersDbContext db) =>
     return Results.Ok(user);
 });
 
-// Регистрация пользователя
-app.MapPost("/api/auth/register", async (
-    RegisterRequest request,
-    UsersDbContext db,
-    IPasswordHasher<User> passwordHasher) =>
-{
-    Console.WriteLine(
-        $"Получен запрос: POST /api/auth/register для {request.Username}");
-
-    if (string.IsNullOrWhiteSpace(request.Username) ||
-        string.IsNullOrWhiteSpace(request.Email) ||
-        string.IsNullOrWhiteSpace(request.Password))
-    {
-        return Results.BadRequest(
-            new { message = "Заполните все поля" });
-    }
-
-    if (request.Password.Length < 8)
-    {
-        return Results.BadRequest(
-            new { message = "Пароль должен содержать минимум 8 символов" });
-    }
-
-    var usernameExists = await db.Users
-        .AnyAsync(u => u.Username == request.Username);
-
-    if (usernameExists)
-    {
-        return Results.BadRequest(
-            new { message = "Такой Username уже существует" });
-    }
-
-    var emailExists = await db.Users
-        .AnyAsync(u => u.Email == request.Email);
-
-    if (emailExists)
-    {
-        return Results.BadRequest(
-            new { message = "Такой Email уже существует" });
-    }
-
-    var user = new User
-    {
-        Username = request.Username.Trim(),
-        Email = request.Email.Trim()
-    };
-
-    user.PasswordHash = passwordHasher.HashPassword(
-        user,
-        request.Password);
-
-    db.Users.Add(user);
-    await db.SaveChangesAsync();
-
-    return Results.Created(
-        $"/api/users/{user.Id}",
-        new
-        {
-            user.Id,
-            user.Username,
-            user.Email
-        });
-});
-
-// Вход в аккаунт
-app.MapPost("/api/auth/login", async (
-    LoginRequest request,
-    UsersDbContext db,
-    IPasswordHasher<User> passwordHasher,
-    IConfiguration configuration) =>
-{
-    Console.WriteLine($"Получен запрос: POST /api/auth/login для {request.Username}");
-
-    // Ищем пользователя по Username
-    var user = await db.Users
-        .FirstOrDefaultAsync(u => u.Username == request.Username);
-
-    if (user is null)
-    {
-        return Results.Unauthorized();
-    }
-
-    // Проверяем пароль
-    var passwordResult = passwordHasher.VerifyHashedPassword(
-        user,
-        user.PasswordHash,
-        request.Password);
-
-    if (passwordResult == PasswordVerificationResult.Failed)
-    {
-        return Results.Unauthorized();
-    }
-
-    // Получаем настройки JWT
-    var jwtKey = configuration["Jwt:Key"]!;
-    var issuer = configuration["Jwt:Issuer"]!;
-    var audience = configuration["Jwt:Audience"]!;
-
-    // Создаём ключ и подпись токена
-    var securityKey = new SymmetricSecurityKey(
-        Encoding.UTF8.GetBytes(jwtKey));
-
-    var credentials = new SigningCredentials(
-        securityKey,
-        SecurityAlgorithms.HmacSha256);
-
-    // Добавляем информацию о пользователе в токен
-    var claims = new[]
-    {
-        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new Claim(ClaimTypes.Name, user.Username),
-        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-    };
-
-    // Создаём JWT
-    var token = new JwtSecurityToken(
-        issuer: issuer,
-        audience: audience,
-        claims: claims,
-        expires: DateTime.UtcNow.AddMinutes(30),
-        signingCredentials: credentials);
-
-    var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
-
-    return Results.Ok(new
-    {
-        accessToken = tokenString,
-        tokenType = "Bearer",
-        expiresAt = token.ValidTo
-    });
-});
-
 // Обновить пользователя
 app.MapPut("/api/users/{id}", async (
     int id,
@@ -370,6 +235,55 @@ app.MapDelete("/api/users/{id}", async (
 })
 .RequireAuthorization();
 
+// Проверить данные авторизованного пользователя
+app.MapGet("/api/users/me", async (
+    ClaimsPrincipal principal,
+    UsersDbContext db) =>
+{
+    var keycloakId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    var username = principal.FindFirst("preferred_username")?.Value;
+    var email = principal.FindFirst(ClaimTypes.Email)?.Value;
+
+    if (string.IsNullOrWhiteSpace(keycloakId))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrWhiteSpace(username) ||
+        string.IsNullOrWhiteSpace(email))
+    {
+        return Results.BadRequest(new
+        {
+            message = "В токене отсутствуют Username или Email"
+        });
+    }
+
+    var user = await db.Users.FirstOrDefaultAsync(
+        u => u.KeycloakId == keycloakId);
+
+    if (user is null)
+    {
+        user = new User
+        {
+            KeycloakId = keycloakId,
+            Username = username,
+            Email = email
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+    }
+
+    return Results.Ok(new
+    {
+        user.Id,
+        user.KeycloakId,
+        user.Username,
+        user.Email
+    });
+})
+.RequireAuthorization();
+
 app.Run();
 
 // Модель пользователя
@@ -377,29 +291,12 @@ class User
 {
     public int Id { get; set; }
 
+    // ID пользователя из Keycloak
+    public string KeycloakId { get; set; } = string.Empty;
+
     public string Username { get; set; } = string.Empty;
 
     public string Email { get; set; } = string.Empty;
-    
-    public string PasswordHash { get; set; } = string.Empty;
-}
-
-// Данные для регистрации
-class RegisterRequest
-{
-    public string Username { get; set; } = string.Empty;
-
-    public string Email { get; set; } = string.Empty;
-
-    public string Password { get; set; } = string.Empty;
-}
-
-// Данные для входа
-class LoginRequest
-{
-    public string Username { get; set; } = string.Empty;
-
-    public string Password { get; set; } = string.Empty;
 }
 
 // Данные для обновления пользователя

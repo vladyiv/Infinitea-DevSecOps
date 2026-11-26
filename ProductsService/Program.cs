@@ -98,22 +98,21 @@ app.MapGet("/api/products/{id}", async (int id, AppDbContext db) =>
 });
 
 // Добавить новый чай
-app.MapPost("/api/products", async (Product product, AppDbContext db, IConnectionMultiplexer redisConnection) =>
+app.MapPost("/api/products", async (
+    Product product,
+    AppDbContext db,
+    IConnectionMultiplexer redisConnection) =>
 {
     Console.WriteLine($"Получен запрос: POST /api/products для чая {product.Name}");
-    
-    // Проверяем, нет ли уже чая с таким ID
-    var exists = await db.Products.AnyAsync(p => p.Id == product.Id);
-    if (exists)
-    {
-        return Results.BadRequest(new { message = $"Товар с ID {product.Id} уже существует" });
-    }
+
+    // Не назначаем ID вручную
+    product.Id = 0;
 
     db.Products.Add(product);
     await db.SaveChangesAsync();
+
     await InvalidateProductsCache(redisConnection);
-    
-    // Возвращаем статус 201 Created и ссылку на созданный товар
+
     return Results.Created($"/api/products/{product.Id}", product);
 });
 
@@ -175,14 +174,6 @@ class Product
     public decimal Price { get; set; }
 
     public Product() { }
-
-    public Product(int id, string name, string description, decimal price)
-    {
-        Id = id;
-        Name = name;
-        Description = description;
-        Price = price;
-    }
 }
 
 class AppDbContext : DbContext
