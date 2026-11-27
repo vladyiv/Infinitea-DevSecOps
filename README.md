@@ -24,9 +24,10 @@
 - **Документация**
   - [Архитектура C4](docs/architecture.png)
   - [Инструкция по запуску](docs/installation.md)
-  - [План API](api-plan.md)
-  - [Отчёт по Docker](docker-report.md)
-  - [Отчёт по Docker Compose](docker-compose-report.md)
+  - [План API](docs/api-plan.md)
+  - [Отчёт по Docker](docs/docker-report.md)
+  - [Отчёт по Docker Compose](docs/docker-compose-report.md)
+  - [Заметки по проекту](docs/project-notes.md)
 
 - [Решение .NET](Infinitea.sln)
 
