@@ -25,7 +25,7 @@ services:
     image: quay.io/keycloak/keycloak:26.8.2
     container_name: infinitea-keycloak
     restart: unless-stopped
-    command: start-dev
+    command: start-dev --import-realm
     ports:
       - "8083:8080"
     environment:
@@ -41,6 +41,8 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
+    volumes:
+      - ./keycloak/infinitea-realm.json:/opt/keycloak/data/import/infinitea-realm.json:ro
         
   gateway:
     image: infinitea-gateway
